@@ -1,0 +1,144 @@
+name: Praktika9 CameraX KZ APK
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Generate project
+        run: |
+          mkdir -p app/src/main/java/com/example/p9 app/src/main/res/values
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name="P9"
+          include(":app")
+          EOF
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+            id("com.android.application") version "8.6.1" apply false
+            id("org.jetbrains.kotlin.android") version "2.0.20" apply false
+            id("org.jetbrains.kotlin.plugin.compose") version "2.0.20" apply false
+          }
+          EOF
+          printf 'org.gradle.jvmargs=-Xmx2048m\nandroid.useAndroidX=true\n' > gradle.properties
+          cat > app/build.gradle.kts <<'EOF'
+          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
+          android {
+            namespace="com.example.p9"; compileSdk=35
+            defaultConfig { applicationId="com.example.p9"; minSdk=24; targetSdk=35; versionCode=1; versionName="1.0" }
+            compileOptions { sourceCompatibility=JavaVersion.VERSION_17; targetCompatibility=JavaVersion.VERSION_17 }
+            buildFeatures { compose=true }
+          }
+          kotlin { jvmToolchain(17) }
+          dependencies {
+            implementation(platform("androidx.compose:compose-bom:2024.09.00"))
+            implementation("androidx.compose.ui:ui")
+            implementation("androidx.compose.material3:material3")
+            implementation("androidx.activity:activity-compose:1.9.2")
+            implementation("androidx.camera:camera-core:1.3.4")
+            implementation("androidx.camera:camera-camera2:1.3.4")
+            implementation("androidx.camera:camera-lifecycle:1.3.4")
+            implementation("androidx.camera:camera-view:1.3.4")
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.CAMERA"/>
+            <application android:theme="@style/AppTheme" android:label="CameraX KZ">
+              <activity android:name=".MainActivity" android:exported="true">
+                <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          echo '<resources><style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar"/></resources>' > app/src/main/res/values/styles.xml
+          cat > app/src/main/java/com/example/p9/MainActivity.kt <<'EOF'
+          package com.example.p9
+          import android.Manifest
+          import android.content.pm.PackageManager
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.compose.setContent
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.camera.core.*
+          import androidx.camera.lifecycle.ProcessCameraProvider
+          import androidx.camera.view.PreviewView
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.viewinterop.AndroidView
+          import androidx.core.content.ContextCompat
+          import androidx.lifecycle.compose.LocalLifecycleOwner
+          import java.io.File
+
+          class MainActivity:ComponentActivity(){
+            override fun onCreate(b:Bundle?){super.onCreate(b);setContent{MaterialTheme{App()}}}
+          }
+          @OptIn(ExperimentalMaterial3Api::class)
+          @Composable fun App(){
+            val ctx=LocalContext.current
+            var ok by remember{mutableStateOf(ContextCompat.checkSelfPermission(ctx,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)}
+            val ask=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){ok=it}
+            Scaffold(topBar={TopAppBar(title={Text("Практикалық жұмыс №9 — CameraX")})}){p->
+              if(!ok) Column(Modifier.padding(p).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+                Text("Камераға рұқсат",style=MaterialTheme.typography.headlineSmall)
+                Text("CAMERA runtime-рұқсаты тірі Preview және ImageCapture үшін қажет.")
+                Button(onClick={ask.launch(Manifest.permission.CAMERA)},modifier=Modifier.fillMaxWidth()){Text("Рұқсат беру")}
+              } else Camera(Modifier.padding(p))
+            }
+          }
+          @Composable fun Camera(m:Modifier){
+            val ctx=LocalContext.current
+            val owner=LocalLifecycleOwner.current
+            val pv=remember{PreviewView(ctx)}
+            val cap=remember{ImageCapture.Builder().build()}
+            var count by remember{mutableIntStateOf(0)}
+            var name by remember{mutableStateOf("—")}
+            var path by remember{mutableStateOf("—")}
+            var status by remember{mutableStateOf("Камера дайындалуда")}
+            LaunchedEffect(Unit){
+              try{
+                val provider=ProcessCameraProvider.getInstance(ctx).get()
+                val preview=Preview.Builder().build().also{it.setSurfaceProvider(pv.surfaceProvider)}
+                provider.unbindAll()
+                provider.bindToLifecycle(owner,CameraSelector.DEFAULT_BACK_CAMERA,preview,cap)
+                status="Артқы камера дайын"
+              }catch(e:Exception){status="Камера қатесі: ${e.message}"}
+            }
+            Column(m.fillMaxSize()){
+              AndroidView({pv},Modifier.weight(1f).fillMaxWidth())
+              Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+                Text("Күйі: $status")
+                Text("Фото саны: $count")
+                Text("Соңғы файл: $name")
+                Text("Файл жолы: $path",maxLines=2)
+                Button(onClick={
+                  val f=File(ctx.externalMediaDirs.firstOrNull()?:ctx.filesDir,"photo_${System.currentTimeMillis()}.jpg")
+                  cap.takePicture(ImageCapture.OutputFileOptions.Builder(f).build(),ContextCompat.getMainExecutor(ctx),object:ImageCapture.OnImageSavedCallback{
+                    override fun onImageSaved(r:ImageCapture.OutputFileResults){count++;name=f.name;path=f.absolutePath;status="Фото сақталды"}
+                    override fun onError(e:ImageCaptureException){status="Сақтау қатесі: ${e.message}"}
+                  })
+                },Modifier.fillMaxWidth()){Text("Фото түсіру және сақтау")}
+              }
+            }
+          }
+          EOF
+      - name: Build APK
+        run: gradle assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Praktika9-CameraX-KZ-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
